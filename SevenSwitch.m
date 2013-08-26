@@ -26,35 +26,32 @@
 #import <QuartzCore/QuartzCore.h>
 
 @interface SevenSwitch ()  {
-    UIView *background;
-    UIView *knob;
-    UIImageView *onImageView;
-    UIImageView *offImageView;
-    BOOL currentVisualValue;
-    BOOL startTrackingValue;
-    BOOL didChangeWhileTracking;
-    BOOL isAnimating;
+    UIView *_background;
+    UIView *_fillView;
+    UIView *_knob;
+    BOOL _isAnimating;
+    BOOL _valueTrackingChanged;
+    BOOL _tempOnValue;
+    
+//    CAShapeLayer *_fillLayer;
+//    CAShapeLayer *_backLayer;
 }
 
-- (void)showOn:(BOOL)animated;
-- (void)showOff:(BOOL)animated;
+@property (nonatomic, assign) BOOL editing;
+
 - (void)setup;
 
 @end
 
+static const CGFloat kAnimationDuration = 0.3f;
+static const CGFloat kActiveThumbleWidthDifference = 7.0f;
 
 @implementation SevenSwitch
-
-@synthesize inactiveColor, activeColor, onTintColor, borderColor, thumbTintColor, shadowColor;
-@synthesize onImage, offImage;
-@synthesize isRounded;
-@synthesize on;
-
 
 #pragma mark init Methods
 
 - (id)init {
-    self = [super initWithFrame:CGRectMake(0, 0, 50, 30)];
+    self = [super initWithFrame:CGRectMake(0.0f, 0.0f, 51.0f, 31.0f)];
     if (self) {
         [self setup];
     }
@@ -69,12 +66,11 @@
     return self;
 }
 
-- (id)initWithFrame:(CGRect)frame
-{
+- (id)initWithFrame:(CGRect)frame {
     // use the default values if CGRectZero frame is set
     CGRect initialFrame;
     if (CGRectIsEmpty(frame)) {
-        initialFrame = CGRectMake(0, 0, 50, 30);
+        initialFrame = CGRectMake(0.0f, 0.0f, 51.0f, 31.0f);
     }
     else {
         initialFrame = frame;
@@ -86,159 +82,256 @@
     return self;
 }
 
+- (void)awakeFromNib {
+    [super awakeFromNib];
+//    [self setup];
+}
 
 /**
  *	Setup the individual elements of the switch and set default values
  */
 - (void)setup {
-
+    _isAnimating = NO;
+    _borderLineWidth = 1.0f;
+    CGFloat width = self.bounds.size.width;
+    CGFloat height = self.bounds.size.height;
+    
     // default values
     self.on = NO;
     self.isRounded = YES;
     self.inactiveColor = [UIColor clearColor];
-    self.activeColor = [UIColor colorWithRed:0.89f green:0.89f blue:0.89f alpha:1.00f];
-    self.onTintColor = [UIColor colorWithRed:0.30f green:0.85f blue:0.39f alpha:1.00f];
-    self.borderColor = [UIColor colorWithRed:0.89f green:0.89f blue:0.91f alpha:1.00f];
+    self.activeColor = [UIColor colorWithRed:229.0f/255.0f green:229.0f/255.0f blue:229.0f/255.0f alpha:1.0f];
+    self.onTintColor = [UIColor colorWithRed:74.0f/255.0f green:213.0f/255.0f blue:98.0f/255.0f alpha:1.0f];
+    self.borderColor = [UIColor colorWithRed:228.0f/255.0f green:228.0f/255.0f blue:228.0f/255.0f alpha:1.0f];
     self.thumbTintColor = [UIColor whiteColor];
     self.shadowColor = [UIColor grayColor];
-    currentVisualValue = NO;
 
     // background
-    background = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.frame.size.width, self.frame.size.height)];
-    background.backgroundColor = [UIColor clearColor];
-    background.layer.cornerRadius = self.frame.size.height * 0.5;
-    background.layer.borderColor = self.borderColor.CGColor;
-    background.layer.borderWidth = 1.0;
-    background.userInteractionEnabled = NO;
-    [self addSubview:background];
-
-    // images
-    onImageView = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, self.frame.size.width - self.frame.size.height, self.frame.size.height)];
-    onImageView.alpha = 0;
-    onImageView.contentMode = UIViewContentModeCenter;
-    [self addSubview:onImageView];
-
-    offImageView = [[UIImageView alloc] initWithFrame:CGRectMake(self.frame.size.height, 0, self.frame.size.width - self.frame.size.height, self.frame.size.height)];
-    offImageView.alpha = 1.0;
-    offImageView.contentMode = UIViewContentModeCenter;
-    [self addSubview:offImageView];
+    _background = [[UIView alloc] initWithFrame:CGRectMake(0.0f, 0.0f, width, height)];
+    _background.backgroundColor = [self backgroundViewBackgroundColorForOnValue:[self isOn]];
+    _background.layer.cornerRadius = height * 0.5f;
+    _background.userInteractionEnabled = NO;
+    [self addSubview:_background];
+    
+    CGFloat offset = _borderLineWidth + _borderLineWidth / 2.0f;
+    CGRect fillRect = CGRectInset(_background.bounds, offset, offset);
+    _fillView = [[UIView alloc] initWithFrame:fillRect];
+    _fillView.backgroundColor = [UIColor whiteColor];
+    _fillView.layer.cornerRadius = fillRect.size.height * 0.5f;
+    _fillView.userInteractionEnabled = NO;
+    [self addSubview:_fillView];
 
     // knob
-    knob = [[UIView alloc] initWithFrame:CGRectMake(1, 1, self.frame.size.height - 2, self.frame.size.height - 2)];
-    knob.backgroundColor = self.thumbTintColor;
-    knob.layer.cornerRadius = (self.frame.size.height * 0.5) - 1;
-    knob.layer.shadowColor = self.shadowColor.CGColor;
-    knob.layer.shadowRadius = 2.0;
-    knob.layer.shadowOpacity = 0.5;
-    knob.layer.shadowOffset = CGSizeMake(0, 3);
-    knob.layer.masksToBounds = NO;
-    knob.userInteractionEnabled = NO;
-    [self addSubview:knob];
+    _knob = [[UIView alloc] initWithFrame:CGRectMake(_borderLineWidth, _borderLineWidth, height - 2 * _borderLineWidth, height - 2 * _borderLineWidth)];
+    _knob.backgroundColor = self.thumbTintColor;
+    _knob.layer.cornerRadius = (height * 0.5f) - 1.0f;
+    _knob.layer.shadowColor = self.shadowColor.CGColor;
+    _knob.layer.shadowRadius = 2.0f;
+    _knob.layer.shadowOpacity = 0.45f;
+    _knob.layer.shadowOffset = CGSizeMake(0.0f, 3.0f);
+    _knob.layer.masksToBounds = NO;
+//    _knob.layer.borderWidth = 0.5f;
+//    _knob.layer.borderColor = [UIColor colorWithRed:210.0f/255.0f green:210.0f/255.0f blue:210.0f/255.0f alpha:1.0f].CGColor;
+    _knob.userInteractionEnabled = NO;
+    [self addSubview:_knob];
+    
+    [self addTarget:self action:@selector(touchUpInside:) forControlEvents:UIControlEventTouchUpInside];
+    [self addTarget:self action:@selector(touchCancel:) forControlEvents:UIControlEventTouchCancel];
+    
+    [self addTarget:self action:@selector(dragEnter:) forControlEvents:UIControlEventTouchDragEnter];
+    
+    [self addTarget:self action:@selector(dragExit:) forControlEvents:UIControlEventTouchDragExit];
+    
+    self.editing = NO;
+}
 
-    isAnimating = NO;
+#pragma mark - Control Events
+- (void)touchUpInside:(id)sender {
+//    BOOL previousValue = self.on;
+    
+    [self setEditing:NO animated:YES];
+    
+//    if (previousValue != self.on) {
+//        [self sendActionsForControlEvents:UIControlEventValueChanged];
+//    }
+}
+
+- (void)dragEnter:(id)sender {
+    [self setEditing:YES animated:YES];
+}
+
+- (void)dragExit:(id)sender {
+    _valueTrackingChanged = YES;
+    [self setEditing:NO animated:YES];
+}
+
+- (void)touchCancel:(id)sender {
+    _valueTrackingChanged = YES;
+    [self setEditing:NO animated:YES];
 }
 
 
 #pragma mark Touch Tracking
-
 - (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     [super beginTrackingWithTouch:touch withEvent:event];
-
-    startTrackingValue = self.on;
-    didChangeWhileTracking = NO;
-
-    // make the knob larger and animate to the correct color
-    CGFloat activeKnobWidth = self.bounds.size.height - 2 + 5;
-    isAnimating = YES;
-    [UIView animateWithDuration:0.3 delay:0.0 options:UIViewAnimationOptionCurveEaseOut|UIViewAnimationOptionBeginFromCurrentState animations:^{
-        if (self.on) {
-            knob.frame = CGRectMake(self.bounds.size.width - (activeKnobWidth + 1), knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-            background.backgroundColor = self.onTintColor;
-        }
-        else {
-            knob.frame = CGRectMake(knob.frame.origin.x, knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-            background.backgroundColor = self.activeColor;
-        }
-    } completion:^(BOOL finished) {
-        isAnimating = NO;
-    }];
-
+    [self setEditing:YES animated:YES];
+    
     return YES;
 }
 
 - (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     [super continueTrackingWithTouch:touch withEvent:event];
-
-    // Get touch location
-    CGPoint lastPoint = [touch locationInView:self];
-
-    // update the switch to the correct visuals depending on if
-    // they moved their touch to the right or left side of the switch
-    if (lastPoint.x > self.bounds.size.width * 0.5) {
-        [self showOn:YES];
-        if (!startTrackingValue) {
-            didChangeWhileTracking = YES;
+    if (self.editing) {
+        // Get touch location
+        CGPoint lastPoint = [touch locationInView:self];
+        
+        // update the switch to the correct visuals depending on if
+        // they moved their touch to the right or left side of the switch
+        if (lastPoint.x > self.bounds.size.width * 0.5f) {
+            if (!_isAnimating && !_tempOnValue) {
+                _valueTrackingChanged = YES;
+                [self setTempOnValue:YES animated:YES];
+            }
+        }
+        else {
+            if (!_isAnimating && _tempOnValue) {
+                _valueTrackingChanged = YES;
+                [self setTempOnValue:NO animated:YES];
+            }
         }
     }
-    else {
-        [self showOff:YES];
-        if (startTrackingValue) {
-            didChangeWhileTracking = YES;
-        }
-    }
-
-    return YES;
-}
-
-- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
-    [super endTrackingWithTouch:touch withEvent:event];
-
-    BOOL previousValue = self.on;
     
-    if (didChangeWhileTracking) {
-        [self setOn:currentVisualValue animated:YES];
-    }
-    else {
-        [self setOn:!self.on animated:YES];
-    }
-
-    if (previousValue != self.on)
-        [self sendActionsForControlEvents:UIControlEventValueChanged];
+    return YES;
 }
 
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
     [super cancelTrackingWithEvent:event];
-
-    // just animate back to the original value
-    if (self.on)
-        [self showOn:YES];
-    else
-        [self showOff:YES];
 }
 
 
-- (void)layoutSubviews {
-    [super layoutSubviews];
+#pragma mark - Knob size changing Animation
+- (CGRect)knobFrameEditinig:(BOOL)editing onValue:(BOOL)onValue {
+    // make the knob larger and animate to the correct color
+    CGRect knobFrame = CGRectZero;
+    
+    CGFloat normalKnobWidth = self.bounds.size.height - 3.0f;//(2 * _borderLineWidth);
+    if (editing) {
+        CGFloat activeKnobWidth = normalKnobWidth + kActiveThumbleWidthDifference;
+        if (onValue) {
+            knobFrame.origin.x = self.bounds.size.width - (activeKnobWidth + _borderLineWidth);
+            knobFrame.origin.y = _borderLineWidth + _borderLineWidth / 2;
+            knobFrame.size.width = activeKnobWidth;
+            knobFrame.size.height = normalKnobWidth;
+        }
+        else {
+            knobFrame.origin.x = _borderLineWidth;
+            knobFrame.origin.y = _borderLineWidth + _borderLineWidth / 2;
+            knobFrame.size.width = activeKnobWidth;
+            knobFrame.size.height = normalKnobWidth;
+        }
+    }
+    else {
+        if (onValue) {
+            knobFrame.origin.x = self.bounds.size.width - (normalKnobWidth + _borderLineWidth);
+            knobFrame.origin.y = _borderLineWidth + _borderLineWidth / 2;
+            knobFrame.size.width = normalKnobWidth;
+            knobFrame.size.height = normalKnobWidth;
+        }
+        else {
+            knobFrame.origin.x = _borderLineWidth;
+            knobFrame.origin.y = _borderLineWidth + _borderLineWidth / 2;
+            knobFrame.size.width = normalKnobWidth;
+            knobFrame.size.height = normalKnobWidth;
+        }
+    }
+   
+    return knobFrame;
+}
 
-    if (!isAnimating) {
-        CGRect frame = self.frame;
+- (void)setEditing:(BOOL)editing {
+    if (_editing != editing) {
+        _editing = editing;
+        
+        if (editing) {
+            _valueTrackingChanged = NO;
+            _tempOnValue = [self isOn];
+        }
+        else {
+            BOOL previousValue = [self isOn];
+            
+            if (_valueTrackingChanged) {
+                _on = _tempOnValue;
+            }
+            else {
+                _on = !_tempOnValue;
+            }
+            
+            if (previousValue != [self isOn]) {
+                [self sendActionsForControlEvents:UIControlEventValueChanged];
+            }
+        }
+        
+        [self setupInterfaceForOnValue:[self isOn]];
+    }
+}
 
-        // background
-        background.frame = CGRectMake(0, 0, frame.size.width, frame.size.height);
-        background.layer.cornerRadius = self.isRounded ? frame.size.height * 0.5 : 2;
+- (void)setEditing:(BOOL)editing animated:(BOOL)animated {
+    if (animated) {
+        _isAnimating = YES;
+        if (!editing && !_valueTrackingChanged) {
+            // custom animation
+//            NSLog(@"custom animation");
+            [UIView animateWithDuration:0.16f
+                                  delay:0.0f
+                                options:UIViewAnimationOptionCurveLinear | UIViewAnimationOptionBeginFromCurrentState
+                             animations:^{
+                                 BOOL onValue = !_tempOnValue;
+                                 _background.backgroundColor = [self backgroundViewBackgroundColorForOnValue:onValue];
+                                 CGRect knobFrame = [self knobFrameEditinig:NO onValue:onValue];
+                                 
+                                 CGAffineTransform transform = CGAffineTransformIdentity;
+                                 CGFloat scale = 0.6f;
+                                 if (onValue) {
+                                     scale = 0.3f;
+                                     knobFrame.origin.x = knobFrame.origin.x + 1.0f;
 
-        // images
-        onImageView.frame = CGRectMake(0, 0, frame.size.width - frame.size.height, frame.size.height);
-        offImageView.frame = CGRectMake(frame.size.height, 0, frame.size.width - frame.size.height, frame.size.height);
-
-        // knob
-        CGFloat normalKnobWidth = frame.size.height - 2;
-        if (self.on)
-            knob.frame = CGRectMake(frame.size.width - (normalKnobWidth + 1), 1, frame.size.height - 2, normalKnobWidth);
-        else
-            knob.frame = CGRectMake(1, 1, normalKnobWidth, normalKnobWidth);
-
-        knob.layer.cornerRadius = self.isRounded ? (frame.size.height * 0.5) - 1 : 2;
+                                     transform = CGAffineTransformTranslate(transform, 8.0f, 0.0f);
+                                     transform = CGAffineTransformScale(transform, scale, scale);
+                                     transform = CGAffineTransformTranslate(transform, -8.0f, 0.0f);
+                                 }
+                                 else {
+                                     knobFrame.origin.x = knobFrame.origin.x - 1.0f;
+                                     transform = CGAffineTransformTranslate(transform, 8.0f, 0.0f);
+                                     transform = CGAffineTransformScale(transform, scale, scale);
+                                     transform = CGAffineTransformTranslate(transform, -8.0f, 0.0f);
+                                 }
+                                 
+                                 _knob.frame = knobFrame;
+                                 _fillView.transform = transform;
+                             } completion:^(BOOL finished) {
+                                 [UIView animateWithDuration:0.16f
+                                                       delay:0.0f
+                                                     options:UIViewAnimationOptionCurveLinear | UIViewAnimationOptionBeginFromCurrentState
+                                                  animations:^{
+                                                      self.editing = editing;
+                                                  } completion:^(BOOL finished) {
+                                                      _isAnimating = NO;
+                                                  }];
+                             }];
+        }
+        else {
+            [UIView animateWithDuration:kAnimationDuration
+                                  delay:0.0f
+                                options:UIViewAnimationOptionCurveEaseInOut | UIViewAnimationOptionBeginFromCurrentState
+                             animations:^{
+                                 self.editing = editing;
+                             } completion:^(BOOL finished) {
+                                 _isAnimating = NO;
+                             }];
+        }
+    }
+    else {
+        self.editing = editing;
     }
 }
 
@@ -246,71 +339,19 @@
 #pragma mark Setters
 
 /*
- *	Sets the background color when the switch is off.
- *  Defaults to clear color.
- */
-- (void)setInactiveColor:(UIColor *)color {
-    inactiveColor = color;
-    if (!self.on && !self.isTracking)
-        background.backgroundColor = color;
-}
-
-/*
- *	Sets the background color that shows when the switch is on.
- *  Defaults to green.
- */
-- (void)setOnTintColor:(UIColor *)color {
-    onTintColor = color;
-    if (self.on && !self.isTracking) {
-        background.backgroundColor = color;
-        background.layer.borderColor = color.CGColor;
-    }
-}
-
-/*
- *	Sets the border color that shows when the switch is off. Defaults to light gray.
- */
-- (void)setBorderColor:(UIColor *)color {
-    borderColor = color;
-    if (!self.on)
-        background.layer.borderColor = color.CGColor;
-}
-
-/*
  *	Sets the knob color. Defaults to white.
  */
 - (void)setThumbTintColor:(UIColor *)color {
-    thumbTintColor = color;
-    knob.backgroundColor = color;
+    _thumbTintColor = color;
+    _knob.backgroundColor = color;
 }
 
 /*
  *	Sets the shadow color of the knob. Defaults to gray.
  */
 - (void)setShadowColor:(UIColor *)color {
-    shadowColor = color;
-    knob.layer.shadowColor = color.CGColor;
-}
-
-
-/*
- *	Sets the image that shows when the switch is on.
- *  The image is centered in the area not covered by the knob.
- *  Make sure to size your images appropriately.
- */
-- (void)setOnImage:(UIImage *)image {
-    onImage = image;
-    onImageView.image = image;
-}
-
-/*
- *	Sets the image that shows when the switch is off.
- *  The image is centered in the area not covered by the knob.
- *  Make sure to size your images appropriately.
- */
-- (void)setOffImage:(UIImage *)image {
-    offImage = image;
-    offImageView.image = image;
+    _shadowColor = color;
+    _knob.layer.shadowColor = color.CGColor;
 }
 
 
@@ -320,16 +361,9 @@
  *  Defaults to YES.
  */
 - (void)setIsRounded:(BOOL)rounded {
-    isRounded = rounded;
-
-    if (rounded) {
-        background.layer.cornerRadius = self.frame.size.height * 0.5;
-        knob.layer.cornerRadius = (self.frame.size.height * 0.5) - 1;
-    }
-    else {
-        background.layer.cornerRadius = 2;
-        knob.layer.cornerRadius = 2;
-    }
+    _isRounded = rounded;
+    _background.layer.cornerRadius = self.bounds.size.height * 0.5f;
+    _knob.layer.cornerRadius = (_knob.bounds.size.height * 0.5f) - 1.0f;
 }
 
 
@@ -340,24 +374,46 @@
     [self setOn:isOn animated:NO];
 }
 
-
 /*
  * Set the state of the switch to on or off, optionally animating the transition.
  */
-- (void)setOn:(BOOL)isOn animated:(BOOL)animated {
-    on = isOn;
-
-    if (isOn) {
-        [self showOn:animated];
+- (void)setTempOnValue:(BOOL)tempOnValue animated:(BOOL)animated {
+    _tempOnValue = tempOnValue;
+    if (animated) {
+        _isAnimating = YES;
+        [UIView animateWithDuration:kAnimationDuration
+                              delay:0.0f
+                            options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{
+                             [self setupInterfaceForOnValue:tempOnValue];
+                         }
+                         completion:^(BOOL finished){
+                             _isAnimating = NO;
+                         }];
     }
     else {
-        [self showOff:animated];
+        [self setupInterfaceForOnValue:tempOnValue];
+    }
+}
+
+- (void)setupInterfaceForOnValue:(BOOL)onValue {
+    _background.backgroundColor = [self backgroundViewBackgroundColorForOnValue:onValue];
+    _knob.frame = [self knobFrameEditinig:self.editing onValue:onValue];
+    if (onValue) {
+        _fillView.transform = CGAffineTransformScale(_fillView.transform, 0.0f, 0.0f);
+    }
+    else {
+        if (self.editing) {
+            _fillView.transform = CGAffineTransformScale(_fillView.transform, 0.0f, 0.0f);
+        }
+        else {
+            _fillView.transform = CGAffineTransformIdentity;
+        }
     }
 }
 
 
-#pragma mark Getters
-
+#pragma mark - Getters
 /*
  *	Detects whether the switch is on or off
  *
@@ -367,103 +423,31 @@
     return self.on;
 }
 
-
-#pragma mark State Changes
-
-
-/*
- * update the looks of the switch to be in the on position
- * optionally make it animated
- */
-- (void)showOn:(BOOL)animated {
-    CGFloat normalKnobWidth = self.bounds.size.height - 2;
-    CGFloat activeKnobWidth = normalKnobWidth + 5;
-    if (animated) {
-        isAnimating = YES;
-        [UIView animateWithDuration:0.3 delay:0.0 options:UIViewAnimationOptionCurveEaseOut|UIViewAnimationOptionBeginFromCurrentState animations:^{
-            if (self.tracking)
-                knob.frame = CGRectMake(self.bounds.size.width - (activeKnobWidth + 1), knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-            else
-                knob.frame = CGRectMake(self.bounds.size.width - (normalKnobWidth + 1), knob.frame.origin.y, normalKnobWidth, knob.frame.size.height);
-            background.backgroundColor = self.onTintColor;
-            background.layer.borderColor = self.onTintColor.CGColor;
-            onImageView.alpha = 1.0;
-            offImageView.alpha = 0;
-        } completion:^(BOOL finished) {
-            isAnimating = NO;
-        }];
-    }
-    else {
-        if (self.tracking)
-            knob.frame = CGRectMake(self.bounds.size.width - (activeKnobWidth + 1), knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-        else
-            knob.frame = CGRectMake(self.bounds.size.width - (normalKnobWidth + 1), knob.frame.origin.y, normalKnobWidth, knob.frame.size.height);
-        background.backgroundColor = self.onTintColor;
-        background.layer.borderColor = self.onTintColor.CGColor;
-        onImageView.alpha = 1.0;
-        offImageView.alpha = 0;
-    }
-    
-    currentVisualValue = YES;
-}
-
-
-/*
- * update the looks of the switch to be in the off position
- * optionally make it animated
- */
-- (void)showOff:(BOOL)animated {
-    CGFloat normalKnobWidth = self.bounds.size.height - 2;
-    CGFloat activeKnobWidth = normalKnobWidth + 5;
-    if (animated) {
-        isAnimating = YES;
-        [UIView animateWithDuration:0.3 delay:0.0 options:UIViewAnimationOptionCurveEaseOut|UIViewAnimationOptionBeginFromCurrentState animations:^{
-            if (self.tracking) {
-                knob.frame = CGRectMake(1, knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-                background.backgroundColor = self.activeColor;
-            }
-            else {
-                knob.frame = CGRectMake(1, knob.frame.origin.y, normalKnobWidth, knob.frame.size.height);
-                background.backgroundColor = self.inactiveColor;
-            }
-            background.layer.borderColor = self.borderColor.CGColor;
-            onImageView.alpha = 0;
-            offImageView.alpha = 1.0;
-        } completion:^(BOOL finished) {
-            isAnimating = NO;
-        }];
-    }
-    else {
-        if (self.tracking) {
-            knob.frame = CGRectMake(1, knob.frame.origin.y, activeKnobWidth, knob.frame.size.height);
-            background.backgroundColor = self.activeColor;
+- (void)setOn:(BOOL)on animated:(BOOL)animated {
+//    NSLog(@"on: %d newON: %d", [self isOn], on);
+    _tempOnValue = !on;
+    if ([self isOn] != on) {
+        if (animated) {
+            _editing = YES;
+            [self setEditing:NO animated:YES];
         }
         else {
-            knob.frame = CGRectMake(1, knob.frame.origin.y, normalKnobWidth, knob.frame.size.height);
-            background.backgroundColor = self.inactiveColor;
+            _editing = YES;
+            [self setEditing:NO animated:NO];
         }
-        background.layer.borderColor = self.borderColor.CGColor;
-        onImageView.alpha = 0;
-        offImageView.alpha = 1.0;
     }
-    
-    currentVisualValue = NO;
 }
 
 - (UIColor *)onColor {
     return self.onTintColor;
 }
 
-- (void)setOnColor:(UIColor *)color {
-    self.onTintColor = color;
-}
-
-- (UIColor *)knobColor {
-    return self.thumbTintColor;
-}
-
-- (void)setKnobColor:(UIColor *)color {
-    self.thumbTintColor = color;
+- (UIColor *)backgroundViewBackgroundColorForOnValue:(BOOL)onValue {
+    if (onValue) {
+        return self.onTintColor;
+    }
+    
+    return self.activeColor;
 }
 
 @end
